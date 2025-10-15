@@ -1,69 +1,53 @@
-import csv
 import os
-import requests
-from io import StringIO
-from dotenv import load_dotenv
+import logging
+import gspread
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
-load_dotenv()
+# Logger
+logging.basicConfig(level=logging.INFO)
 
+# Google Sheets ulanish
+gc = gspread.service_account(filename="credentials.json")
+spreadsheet_id = os.getenv("SPREADSHEET_ID")
+sheet = gc.open_by_key(spreadsheet_id).sheet1  # 1-sheet
+
+# Bot token
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-CSV_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv"
 
-def get_constitution_data():
-    try:
-        response = requests.get(CSV_URL)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print("Xatolik:", e)
-        return {}
+# Klaviatura tugmalari (1–10 misol tariqasida, kerak bo‘lsa kengaytiring)
+keyboard = [[str(i)] for i in range(1, 11)]  # 1 dan 10 gacha tugmalar
 
-    data = {}
-    csv_data = response.content.decode('utf-8')
-    reader = csv.reader(StringIO(csv_data))
+markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    for row in reader:
-        if len(row) >= 2:
-            raqam = row[0].strip()
-            matn = row[1].strip()
-            data[raqam] = matn
 
-    return data
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Assalomu alaykum! Raqamni kiriting (masalan, 1) — shunda o‘sha modda chiqariladi.", reply_markup=markup)
 
-def start(update: Update, context: CallbackContext):
-    data = get_constitution_data()
-    if not data:
-        update.message.reply_text("Ma'lumotlarni yuklashda xatolik yuz berdi.")
-        return
 
-    keyboard = [[k] for k in data.keys()]
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-    update.message.reply_text("Qaysi moddani ko‘rmoqchisiz?", reply_markup=reply_markup)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
 
-def handle_message(update: Update, context: CallbackContext):
-    raqam = update.message.text.strip()
-    data = get_constitution_data()
+    if text.isdigit():
+        modda_raqami = int(text)
+        try:
+            # Sheetda: A ustun = raqam, B ustun = modda matni deb faraz qilamiz
+            rows = sheet.get_all_records()
+            modda = next((row for row in rows if int(row['modda']) == modda_raqami), None)
 
-    if raqam in data:
-        update.message.reply_text(data[raqam])
+            if modda:
+                await update.message.reply_text(f"🧾 {modda_raqami}-modda:\n\n{modda['matn']}")
+            else:
+                await update.message.reply_text("❌ Bunday modda topilmadi.")
+        except Exception as e:
+            logging.error(f"Xato: {e}")
+            await update.message.reply_text("❌ Xatolik yuz berdi. Keyinroq urinib ko‘ring.")
     else:
-        update.message.reply_text("Bunday modda topilmadi. Iltimos, /start buyrug'ini qayta yuboring.")
+        await update.message.reply_text("❗ Iltimos, faqat modda raqamini kiriting.")
 
-def main():
-    if not BOT_TOKEN or not SPREADSHEET_ID:
-        print("❌ BOT_TOKEN yoki SPREADSHEET_ID .env faylda topilmadi!")
-        return
 
-    updater = Updater(BOT_TOKEN)
-    dp = updater.dispatcher
-
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-
-    updater.start_polling()
-    updater.idle()
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    app.add_handler(MessageHandler(filters.COMMAND, start))
+    app.run_polling()
