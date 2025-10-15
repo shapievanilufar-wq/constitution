@@ -1,53 +1,60 @@
 import os
-import logging
-import gspread
+import csv
+import requests
+from io import StringIO
+from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-# Logger
-logging.basicConfig(level=logging.INFO)
-
-# Google Sheets ulanish
-gc = gspread.service_account(filename="credentials.json")
-spreadsheet_id = os.getenv("SPREADSHEET_ID")
-sheet = gc.open_by_key(spreadsheet_id).sheet1  # 1-sheet
-
-# Bot token
+load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
-# Klaviatura tugmalari (1–10 misol tariqasida, kerak bo‘lsa kengaytiring)
-keyboard = [[str(i)] for i in range(1, 11)]  # 1 dan 10 gacha tugmalar
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid=0"
 
-markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+# Moddalarni yuklash funksiyasi
+def load_constitution():
+    response = requests.get(CSV_URL)
+    response.raise_for_status()
+    f = StringIO(response.text)
+    reader = csv.DictReader(f)
+    data = {}
+    for row in reader:
+        modda = row.get("Modda")
+        matn = row.get("Matn")
+        if modda and matn:
+            data[modda.strip()] = matn.strip()
+    return data
 
+keyboard = []
+constitution = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Assalomu alaykum! Raqamni kiriting (masalan, 1) — shunda o‘sha modda chiqariladi.", reply_markup=markup)
+    global constitution, keyboard
+    try:
+        constitution = load_constitution()
+        keyboard = [list(constitution.keys())]
+    except Exception as e:
+        await update.message.reply_text(f"Ma'lumotlarni yuklashda xatolik: {e}")
+        return
 
+    await update.message.reply_text(
+        "Konstitutsiya moddalari bo‘yicha ma'lumot olish uchun modda raqamini tanlang:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-
-    if text.isdigit():
-        modda_raqami = int(text)
-        try:
-            # Sheetda: A ustun = raqam, B ustun = modda matni deb faraz qilamiz
-            rows = sheet.get_all_records()
-            modda = next((row for row in rows if int(row['modda']) == modda_raqami), None)
-
-            if modda:
-                await update.message.reply_text(f"🧾 {modda_raqami}-modda:\n\n{modda['matn']}")
-            else:
-                await update.message.reply_text("❌ Bunday modda topilmadi.")
-        except Exception as e:
-            logging.error(f"Xato: {e}")
-            await update.message.reply_text("❌ Xatolik yuz berdi. Keyinroq urinib ko‘ring.")
+    if text in constitution:
+        await update.message.reply_text(constitution[text])
     else:
-        await update.message.reply_text("❗ Iltimos, faqat modda raqamini kiriting.")
-
+        await update.message.reply_text("Kechirasiz, bunday modda topilmadi. Iltimos, klaviaturadan modda raqamini tanlang.")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    app.add_handler(MessageHandler(filters.COMMAND, start))
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("Bot ishga tushdi...")
     app.run_polling()
