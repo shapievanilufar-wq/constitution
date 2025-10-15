@@ -6,14 +6,12 @@ from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-# === .env faylni yuklaymiz ===
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv"
 
-# Google Sheets'dan ma'lumotni CSV ko‘rinishda olish
 def get_constitution_data():
     try:
         response = requests.get(CSV_URL)
