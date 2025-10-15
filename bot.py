@@ -32,8 +32,10 @@ def build_keyboard_page(items, page, page_size=PAGE_SIZE):
     end = start + page_size
     page_items = items[start:end]
 
+    # Har modda uchun alohida qatorda tugma
     keyboard = [[KeyboardButton(str(modda))] for modda in page_items]
 
+    # Navigatsiya tugmalari: bir qatorga joylashtiramiz
     nav_buttons = []
     if page > 0:
         nav_buttons.append(KeyboardButton("⬅️ Oldingi"))
