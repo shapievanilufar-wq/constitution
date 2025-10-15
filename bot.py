@@ -1,60 +1,71 @@
+import csv
+import os
+import requests
+from io import StringIO
+from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 
-# === Google Sheets sozlamalari ===
-SERVICE_ACCOUNT_FILE = 'credentials.json'
-SPREADSHEET_ID = 'SIZNING_SPREADSHEET_ID'  # <-- bu yerga Google Sheets faylingiz ID sini yozing
-RANGE_NAME = 'A2:B'  # A ustun = raqami, B ustun = mazmuni (sarlavhasiz)
+# === .env faylni yuklaymiz ===
+load_dotenv()
 
-# Google Sheets API ulanish
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
-    scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
-)
-sheets_service = build('sheets', 'v4', credentials=credentials)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv"
 
-# Google Sheetsdan ma'lumot o'qish
+# Google Sheets'dan ma'lumotni CSV ko‘rinishda olish
 def get_constitution_data():
-    sheet = sheets_service.spreadsheets()
-    result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME).execute()
-    values = result.get('values', [])
+    try:
+        response = requests.get(CSV_URL)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print("Xatolik:", e)
+        return {}
+
     data = {}
-    for row in values:
+    csv_data = response.content.decode('utf-8')
+    reader = csv.reader(StringIO(csv_data))
+
+    for row in reader:
         if len(row) >= 2:
             raqam = row[0].strip()
             matn = row[1].strip()
             data[raqam] = matn
+
     return data
 
-# /start komandasi
 def start(update: Update, context: CallbackContext):
     data = get_constitution_data()
+    if not data:
+        update.message.reply_text("Ma'lumotlarni yuklashda xatolik yuz berdi.")
+        return
+
     keyboard = [[k] for k in data.keys()]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     update.message.reply_text("Qaysi moddani ko‘rmoqchisiz?", reply_markup=reply_markup)
 
-# Foydalanuvchi tugmani bosganda
 def handle_message(update: Update, context: CallbackContext):
     raqam = update.message.text.strip()
     data = get_constitution_data()
+
     if raqam in data:
         update.message.reply_text(data[raqam])
     else:
-        update.message.reply_text("Bunday modda topilmadi. Iltimos, /start ni qayta bosing.")
+        update.message.reply_text("Bunday modda topilmadi. Iltimos, /start buyrug'ini qayta yuboring.")
 
-# Botni ishga tushurish
 def main():
-    TOKEN = 'SIZNING_BOT_TOKEN'  # <-- bu yerga @BotFather'dan olingan tokenni yozing
-    updater = Updater(TOKEN)
+    if not BOT_TOKEN or not SPREADSHEET_ID:
+        print("❌ BOT_TOKEN yoki SPREADSHEET_ID .env faylda topilmadi!")
+        return
+
+    updater = Updater(BOT_TOKEN)
     dp = updater.dispatcher
 
-    dp.add_handler(CommandHandler('start', start))
+    dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
     updater.start_polling()
     updater.idle()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
